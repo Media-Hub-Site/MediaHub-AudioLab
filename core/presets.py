@@ -2,9 +2,58 @@
 core/presets.py
 ───────────────
 Colección curada de fórmulas matemáticas Bytebeat y presets procedurales listos para usar en AudioLab.
+Incluye la serie legendaria Salinewin y clásicos de la demoscene.
 """
 
 BYTEBEAT_PRESETS = [
+    {
+        "name": "Salinewin 1",
+        "author": "Salinewin",
+        "formula": "t & t >> 8",
+        "rate": 8000,
+        "duration": 5.0,
+        "description": "Fórmula minimalista clásica Bytebeat por Salinewin.",
+    },
+    {
+        "name": "Salinewin 2",
+        "author": "Salinewin",
+        "formula": "t >> 5 | (t >> 2) * (t >> 5)",
+        "rate": 8000,
+        "duration": 5.0,
+        "description": "Arpegio armónico y rítmico multinivel por Salinewin.",
+    },
+    {
+        "name": "Salinewin 3",
+        "author": "Salinewin",
+        "formula": "t * ((t / 2 >> 10 | t % 16 * t >> 8) & 8 * t >> 12 & 18) | -(t / 16) + 64",
+        "rate": 8000,
+        "duration": 6.0,
+        "description": "Secuencia con bajo rítmico y modulación de bits por Salinewin.",
+    },
+    {
+        "name": "Salinewin 4",
+        "author": "Salinewin",
+        "formula": "t * (t & 16384 ? 6 : 5) * (4 - (1 & t >> 8)) >> (3 & t >> 9) | (t | t * 3) >> 5",
+        "rate": 8000,
+        "duration": 6.0,
+        "description": "Melodía chiptune estructurada con cambios de escala por Salinewin.",
+    },
+    {
+        "name": "Salinewin 5",
+        "author": "Salinewin",
+        "formula": "t * ((t & 4096 ? 6 : 16) + (1 & (t + 16384) >> 14)) >> (3 & t >> 8) | t >> (t & 4096 ? 3 : 4)",
+        "rate": 8000,
+        "duration": 6.0,
+        "description": "Patrón polifónico y armónico progresivo por Salinewin.",
+    },
+    {
+        "name": "Salinewin 6",
+        "author": "Salinewin",
+        "formula": "t * ((t & 4096 ? t % 65536 < 59392 ? 7 : t & 4 : 16) ^ (1 & t >> 14)) >> (3 & -t >> (t & 2048 ? 2 : 10))",
+        "rate": 8000,
+        "duration": 7.0,
+        "description": "Sinfonía matemática compleja con ternarios anidados por Salinewin.",
+    },
     {
         "name": "Classic 42 Melody",
         "author": "viznut (2011)",
@@ -45,14 +94,6 @@ BYTEBEAT_PRESETS = [
         "duration": 5.0,
         "description": "Texturas experimentales microtonales y caóticas.",
     },
-    {
-        "name": "Pure Sine Tone (Harmonic)",
-        "author": "AudioLab",
-        "formula": "int((sin(t * 0.05) + 1.0) * 127)",
-        "rate": 8000,
-        "duration": 3.0,
-        "description": "Tono senoidal modulado matemáticamente.",
-    },
 ]
 
 SFX_PRESETS = [
@@ -78,30 +119,30 @@ SFX_PRESETS = [
         "freq": 980.0,
         "duration": 0.18,
         "wave": "square",
-        "desc": "Disparo espacial retro con modulación exponencial.",
+        "desc": "Efecto retro de disparo sintetizado.",
     },
     {
-        "name": "Salto / Up",
+        "name": "Salto Chiptune",
         "type": "jump",
         "freq": 320.0,
-        "duration": 0.16,
+        "duration": 0.20,
         "wave": "sine",
-        "desc": "Deslizamiento ascendente estilo plataformas.",
+        "desc": "Modulación rápida ascendente estilo plataformas.",
     },
     {
-        "name": "Explosión / Bomba",
+        "name": "Explosión / Impacto",
         "type": "explosion",
         "freq": 160.0,
         "duration": 0.45,
         "wave": "noise",
-        "desc": "Impacto de ruido filtrado y grave.",
+        "desc": "Ráfaga de ruido blanco con graves profundos.",
     },
     {
         "name": "Campana Zen",
         "type": "bell",
-        "freq": 587.33,
-        "duration": 0.85,
-        "wave": "sine",
-        "desc": "Armónicos metálicos resonantes con decaimiento prolongado.",
+        "freq": 740.0,
+        "duration": 0.90,
+        "wave": "metallic",
+        "desc": "Tono brillante con decaimiento armónico metálico.",
     },
 ]

@@ -3,7 +3,10 @@ core/synth_engine.py
 ────────────────────
 Motor de síntesis matemática y algorítmica para AudioLab.
 Soporta:
-1. Expresiones Bytebeat (matemáticas modulares sobre variable de tiempo 't').
+1. Expresiones Bytebeat nativas en sintaxis C / JavaScript / Python
+   - Operadores ternarios anidados (cond ? val1 : val2)
+   - Operaciones lógicas (&&, ||, !) y bitwise (&, |, ^, ~, <<, >>)
+   - División entera C-style ('/')
 2. Generador procedural de efectos SFX (Pop/Burbuja, Láser, Moneda/Éxito, Salto, Explosión, Campana).
 3. Exportación a archivo estándar WAV PCM de 16 bits.
 """
@@ -13,6 +16,187 @@ import random
 import struct
 import wave
 import io
+import re
+
+
+class ExprParser:
+    """
+    Parser recursivo descendente que traduce expresiones Bytebeat C/JS
+    a expresiones Python válidas.
+    Soporta operador ternario anidado (cond ? a : b), operadores lógicos (&&, ||, !),
+    operadores bitwise (&, |, ^, ~, <<, >>), división entera ('/' -> '//')
+    y funciones matemáticas estándar.
+    """
+    def __init__(self, s: str):
+        # Convertir división '/' única en '//' (en C / JS bytebeat, int/int es división entera)
+        s = re.sub(r'(?<!/)/(?!/)', '//', s)
+        token_spec = [
+            ('NUMBER',   r'\d+(\.\d+)?'),
+            ('ID',       r'[a-zA-Z_]\w*'),
+            ('OP2',      r'<<|>>|<=|>=|==|!=|&&|\|\||//'),
+            ('OP1',      r'[+\-*%&|^~<>,]'),
+            ('QUESTION', r'\?'),
+            ('COLON',    r':'),
+            ('LPAREN',   r'\('),
+            ('RPAREN',   r'\)'),
+            ('WS',       r'\s+'),
+        ]
+        tok_regex = '|'.join(f'(?P<{pair[0]}>{pair[1]})' for pair in token_spec)
+        self.tokens = []
+        for mo in re.finditer(tok_regex, s):
+            kind = mo.lastgroup
+            val = mo.group()
+            if kind != 'WS':
+                self.tokens.append((kind, val))
+        self.pos = 0
+
+    def peek(self):
+        if self.pos < len(self.tokens):
+            return self.tokens[self.pos]
+        return (None, None)
+
+    def next(self):
+        t = self.peek()
+        self.pos += 1
+        return t
+
+    def parse(self) -> str:
+        res = self.parse_ternary()
+        if self.pos < len(self.tokens):
+            raise ValueError(f"Tokens inesperados al final: {self.tokens[self.pos:]}")
+        return res
+
+    def parse_ternary(self):
+        cond = self.parse_logical_or()
+        if self.peek()[0] == 'QUESTION':
+            self.next()  # Consumir '?'
+            true_expr = self.parse_ternary()
+            if self.peek()[0] != 'COLON':
+                raise ValueError("Se esperaba ':' tras operador ternario '?'")
+            self.next()  # Consumir ':'
+            false_expr = self.parse_ternary()
+            return f"(({true_expr}) if ({cond}) else ({false_expr}))"
+        return cond
+
+    def parse_logical_or(self):
+        node = self.parse_logical_and()
+        while self.peek()[1] == '||':
+            self.next()
+            right = self.parse_logical_and()
+            node = f"({node} or {right})"
+        return node
+
+    def parse_logical_and(self):
+        node = self.parse_bitwise_or()
+        while self.peek()[1] == '&&':
+            self.next()
+            right = self.parse_bitwise_or()
+            node = f"({node} and {right})"
+        return node
+
+    def parse_bitwise_or(self):
+        node = self.parse_bitwise_xor()
+        while self.peek()[1] == '|':
+            self.next()
+            right = self.parse_bitwise_xor()
+            node = f"({node} | {right})"
+        return node
+
+    def parse_bitwise_xor(self):
+        node = self.parse_bitwise_and()
+        while self.peek()[1] == '^':
+            self.next()
+            right = self.parse_bitwise_and()
+            node = f"({node} ^ {right})"
+        return node
+
+    def parse_bitwise_and(self):
+        node = self.parse_equality()
+        while self.peek()[1] == '&':
+            self.next()
+            right = self.parse_equality()
+            node = f"({node} & {right})"
+        return node
+
+    def parse_equality(self):
+        node = self.parse_relational()
+        while self.peek()[1] in ('==', '!='):
+            op = self.next()[1]
+            right = self.parse_relational()
+            node = f"({node} {op} {right})"
+        return node
+
+    def parse_relational(self):
+        node = self.parse_shift()
+        while self.peek()[1] in ('<', '<=', '>', '>='):
+            op = self.next()[1]
+            right = self.parse_shift()
+            node = f"({node} {op} {right})"
+        return node
+
+    def parse_shift(self):
+        node = self.parse_additive()
+        while self.peek()[1] in ('<<', '>>'):
+            op = self.next()[1]
+            right = self.parse_additive()
+            node = f"({node} {op} {right})"
+        return node
+
+    def parse_additive(self):
+        node = self.parse_multiplicative()
+        while self.peek()[1] in ('+', '-'):
+            op = self.next()[1]
+            right = self.parse_multiplicative()
+            node = f"({node} {op} {right})"
+        return node
+
+    def parse_multiplicative(self):
+        node = self.parse_unary()
+        while self.peek()[1] in ('*', '//', '%'):
+            op = self.next()[1]
+            right = self.parse_unary()
+            node = f"({node} {op} {right})"
+        return node
+
+    def parse_unary(self):
+        if self.peek()[1] in ('+', '-', '~'):
+            op = self.next()[1]
+            right = self.parse_unary()
+            return f"({op}{right})"
+        elif self.peek()[1] == '!':
+            self.next()
+            right = self.parse_unary()
+            return f"(not ({right}))"
+        return self.parse_primary()
+
+    def parse_primary(self):
+        tok = self.peek()
+        if tok[0] == 'NUMBER':
+            return self.next()[1]
+        elif tok[0] == 'ID':
+            func_name = self.next()[1]
+            if self.peek()[0] == 'LPAREN':
+                self.next()
+                args = []
+                if self.peek()[0] != 'RPAREN':
+                    args.append(self.parse_ternary())
+                    while self.peek()[1] == ',':
+                        self.next()
+                        args.append(self.parse_ternary())
+                if self.peek()[0] != 'RPAREN':
+                    raise ValueError(f"Se esperaba ')' al invocar {func_name}")
+                self.next()
+                return func_name + '(' + ', '.join(args) + ')'
+            return func_name
+        elif tok[0] == 'LPAREN':
+            self.next()
+            expr = self.parse_ternary()
+            if self.peek()[0] != 'RPAREN':
+                raise ValueError("Se esperaba ')' de cierre")
+            self.next()
+            return f"({expr})"
+        else:
+            raise ValueError(f"Token no esperado: {tok}")
 
 
 class SynthEngine:
@@ -20,8 +204,8 @@ class SynthEngine:
     def evaluate_bytebeat(formula_str: str, duration_sec: float = 4.0, sample_rate: int = 8000) -> list[float]:
         """
         Evalúa de forma segura una expresión matemática Bytebeat sobre 't' (0..N).
-        Las fórmulas Bytebeat clásicas devuelven enteros entre 0 y 255.
-        Se normalizan a flotantes en el rango [-1.0, 1.0].
+        Soporta sintaxis C / JS (operadores ternarios '?', división entera '/', etc.)
+        y devuelve una lista de floats normalizados en [-1.0, 1.0].
         """
         total_samples = int(duration_sec * sample_rate)
         samples = []
@@ -38,12 +222,23 @@ class SynthEngine:
             "abs": abs,
             "min": min,
             "max": max,
+            "int": int,
             "random": random.random,
         }
 
+        # Intentar transpilar sintaxis C/JS a Python si incluye operadores como ?, &&, || o /
+        clean_formula = formula_str.strip()
+        transpiled = clean_formula
+        try:
+            parser = ExprParser(clean_formula)
+            transpiled = parser.parse()
+        except Exception:
+            # Si el parser falla (por ejemplo por sintaxis python nativa no C), intentar directamente con formula
+            transpiled = clean_formula
+
         # Compilar la expresión una sola vez
         try:
-            compiled = compile(formula_str, "<string>", "eval")
+            compiled = compile(transpiled, "<string>", "eval")
         except Exception as e:
             raise ValueError(f"Error de sintaxis en la fórmula: {e}")
 
@@ -51,10 +246,9 @@ class SynthEngine:
             safe_dict["t"] = t
             try:
                 val = eval(compiled, {"__builtins__": {}}, safe_dict)
-                # Tomar byte bajo si es entero
                 if isinstance(val, (int, float)):
                     byte_val = int(val) & 255
-                    # Normalizar a rango [-1.0, 1.0]
+                    # Normalizar byte [0..255] a rango [-1.0, 1.0]
                     norm = (byte_val - 128) / 128.0
                     samples.append(norm)
                 else:
@@ -107,7 +301,6 @@ class SynthEngine:
                 freq = base_freq * math.exp(-progress * 4.5)
                 phase = 2.0 * math.pi * freq * t
                 env = max(0.0, 1.0 - progress)
-                # Onda cuadrada o triangular para láser
                 if wave_type == "square":
                     val = (1.0 if math.sin(phase) > 0 else -1.0) * env
                 else:

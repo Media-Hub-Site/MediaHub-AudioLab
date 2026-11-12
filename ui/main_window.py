@@ -3,6 +3,11 @@ ui/main_window.py
 ─────────────────
 Ventana Principal de AudioLab — Estudio de Síntesis Matemática y Efectos Procedurales.
 Diseño moderno Bento Grid / Media Hub Theme.
+Incluye:
+- Visualizador multi-espectro (Onda, Barras FFT, Radar Cósmico, Cinta Waterfall continua).
+- Modo de reproducción infinita sin límite de tiempo (Live Stream continuo).
+- Bloqueo visual e informativo para no exportar audio ilimitado.
+- Presets de Bytebeat y efectos procedurales SFX.
 """
 
 import os
@@ -12,13 +17,14 @@ import threading
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QPlainTextEdit, QComboBox, QSlider, QSpinBox, QFileDialog, QMessageBox,
-    QTabWidget, QFrame, QGridLayout, QScrollArea
+    QTabWidget, QFrame, QGridLayout, QScrollArea, QCheckBox
 )
 from PyQt6.QtGui import QIcon, QFont
 from PyQt6.QtCore import Qt, QTimer
 
 from core.synth_engine import SynthEngine
 from core.presets import BYTEBEAT_PRESETS, SFX_PRESETS
+from core.live_streamer import LiveStreamManager
 from ui.wave_visualizer import WaveVisualizer
 
 
@@ -26,13 +32,18 @@ class AudioLabWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("AudioLab — Laboratorio de Sonido y Fórmulas Matemáticas")
-        self.resize(1060, 720)
-        self.setMinimumSize(960, 640)
+        self.resize(1080, 740)
+        self.setMinimumSize(980, 660)
 
         # Buffer activo
         self.current_samples = []
         self.current_sample_rate = 44100
         self.temp_wav_path = os.path.join(tempfile.gettempdir(), "audiolab_preview.wav")
+
+        # Gestor de streaming continuo (Sin límite)
+        self.stream_manager = LiveStreamManager(self)
+        self.stream_manager.samples_generated.connect(self._on_live_samples_received)
+        self.stream_manager.streaming_error.connect(self._on_streaming_error)
 
         self._setup_icon()
         self.init_ui()
@@ -51,8 +62,8 @@ class AudioLabWindow(QMainWindow):
         central = QWidget()
         self.setCentralWidget(central)
         root_layout = QVBoxLayout(central)
-        root_layout.setContentsMargins(28, 22, 28, 22)
-        root_layout.setSpacing(16)
+        root_layout.setContentsMargins(28, 20, 28, 20)
+        root_layout.setSpacing(14)
 
         # ── 1. Header Bento ───────────────────────────────────────────────────
         header_layout = QHBoxLayout()
@@ -69,6 +80,25 @@ class AudioLabWindow(QMainWindow):
         header_layout.addLayout(title_box)
         header_layout.addStretch()
 
+        # Botón Detener Todo
+        self.btn_stop = QPushButton("⏹ Detener")
+        self.btn_stop.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_stop.setFixedHeight(38)
+        self.btn_stop.setStyleSheet("""
+            QPushButton {
+                background-color: #334155;
+                color: #F8FAFC;
+                font-weight: 700;
+                font-size: 9.5pt;
+                padding: 0 16px;
+                border-radius: 8px;
+                border: 1px solid #475569;
+            }
+            QPushButton:hover { background-color: #475569; }
+        """)
+        self.btn_stop.clicked.connect(self._stop_playback)
+        header_layout.addWidget(self.btn_stop)
+
         # Botón Exportar WAV
         self.btn_export = QPushButton("Exportar .WAV")
         self.btn_export.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -78,20 +108,25 @@ class AudioLabWindow(QMainWindow):
                 background-color: #2563EB;
                 color: #FFFFFF;
                 font-weight: 700;
-                font-size: 10pt;
+                font-size: 9.5pt;
                 padding: 0 20px;
                 border-radius: 8px;
                 border: none;
             }
             QPushButton:hover { background-color: #1D4ED8; }
+            QPushButton:disabled {
+                background-color: #1E293B;
+                color: #64748B;
+                border: 1px solid #334155;
+            }
         """)
         self.btn_export.clicked.connect(self._export_wav)
         header_layout.addWidget(self.btn_export)
 
         root_layout.addLayout(header_layout)
 
-        # ── 2. Visualizador Osciloscopio ─────────────────────────────────────
-        self.visualizer = WaveVisualizer()
+        # ── 2. Visualizador Multi-Espectro ───────────────────────────────────
+        self.visualizer = WaveVisualizer(self)
         root_layout.addWidget(self.visualizer)
 
         # ── 3. Tabs de Creación (Fórmulas vs SFX) ─────────────────────────────
@@ -133,7 +168,7 @@ class AudioLabWindow(QMainWindow):
 
     def _init_bytebeat_tab(self):
         layout = QVBoxLayout(self.tab_bytebeat)
-        layout.setSpacing(12)
+        layout.setSpacing(10)
 
         # Selector de Presets
         row_preset = QHBoxLayout()
@@ -161,7 +196,7 @@ class AudioLabWindow(QMainWindow):
                 font-family: Consolas, monospace;
             }
         """)
-        self.txt_formula.setFixedHeight(75)
+        self.txt_formula.setFixedHeight(70)
         layout.addWidget(self.txt_formula)
 
         self.lbl_desc = QLabel()
@@ -175,7 +210,7 @@ class AudioLabWindow(QMainWindow):
         lbl_dur = QLabel("Duración (s):")
         lbl_dur.setStyleSheet("color: #CBD5E1;")
         self.spin_duration = QSpinBox()
-        self.spin_duration.setRange(1, 30)
+        self.spin_duration.setRange(1, 60)
         self.spin_duration.setValue(5)
 
         lbl_rate = QLabel("Frecuencia Muestreo:")
@@ -189,6 +224,7 @@ class AudioLabWindow(QMainWindow):
         controls_row.addWidget(self.combo_rate)
         controls_row.addStretch()
 
+        # Botón 1: Sintetizar y Reproducir Finito
         self.btn_play_bytebeat = QPushButton("▶ Sintetizar y Reproducir")
         self.btn_play_bytebeat.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_play_bytebeat.setFixedHeight(40)
@@ -197,8 +233,8 @@ class AudioLabWindow(QMainWindow):
                 background-color: #10B981;
                 color: #FFFFFF;
                 font-weight: 700;
-                font-size: 10.5pt;
-                padding: 0 24px;
+                font-size: 10pt;
+                padding: 0 20px;
                 border-radius: 8px;
                 border: none;
             }
@@ -207,7 +243,31 @@ class AudioLabWindow(QMainWindow):
         self.btn_play_bytebeat.clicked.connect(self._run_bytebeat)
         controls_row.addWidget(self.btn_play_bytebeat)
 
+        # Botón 2: Reproducción Continua Sin Límite
+        self.btn_infinite = QPushButton("♾️ Reproducir Sin Límite")
+        self.btn_infinite.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_infinite.setFixedHeight(40)
+        self.btn_infinite.setStyleSheet("""
+            QPushButton {
+                background-color: #8B5CF6;
+                color: #FFFFFF;
+                font-weight: 700;
+                font-size: 10pt;
+                padding: 0 20px;
+                border-radius: 8px;
+                border: none;
+            }
+            QPushButton:hover { background-color: #7C3AED; }
+        """)
+        self.btn_infinite.clicked.connect(self._toggle_infinite_stream)
+        controls_row.addWidget(self.btn_infinite)
+
         layout.addLayout(controls_row)
+
+        # Barra informativa sobre el modo sin límite
+        self.lbl_infinite_notice = QLabel("💡 Modo 'Sin Límite': reproduce continuamente en tiempo real. En este modo no se descarga el archivo ya que no tiene duración fija.")
+        self.lbl_infinite_notice.setStyleSheet("color: #A78BFA; font-size: 8.5pt; font-style: italic;")
+        layout.addWidget(self.lbl_infinite_notice)
 
     def _init_sfx_tab(self):
         layout = QVBoxLayout(self.tab_sfx)
@@ -258,25 +318,75 @@ class AudioLabWindow(QMainWindow):
             self.lbl_desc.setText(f"{p['description']} (Autor: {p['author']})")
             self.spin_duration.setValue(int(p["duration"]))
 
+    def _get_selected_rate(self) -> int:
+        rate_map = {0: 8000, 1: 11025, 2: 16000, 3: 22050, 4: 44100}
+        return rate_map.get(self.combo_rate.currentIndex(), 8000)
+
+    def _toggle_infinite_stream(self):
+        if self.stream_manager.is_running():
+            self._stop_playback()
+            return
+
+        formula = self.txt_formula.toPlainText().strip()
+        if not formula:
+            QMessageBox.warning(self, "AudioLab", "Por favor ingresa una fórmula matemática para escuchar.")
+            return
+
+        # Detener cualquier sonido previo
+        self._stop_playback()
+
+        rate = self._get_selected_rate()
+        started = self.stream_manager.start_infinite_stream(formula, sample_rate=rate)
+        if started:
+            self.btn_infinite.setText("⏹ Detener Sin Límite")
+            self.btn_infinite.setStyleSheet("""
+                QPushButton {
+                    background-color: #DC2626;
+                    color: #FFFFFF;
+                    font-weight: 700;
+                    font-size: 10pt;
+                    padding: 0 20px;
+                    border-radius: 8px;
+                    border: none;
+                }
+                QPushButton:hover { background-color: #B91C1C; }
+            """)
+            self.btn_export.setEnabled(False)
+            self.btn_export.setToolTip("La exportación está deshabilitada en el modo sin límite de tiempo (flujo continuo infinito).")
+            self.visualizer.set_live_mode(True)
+
+    def _on_live_samples_received(self, samples_chunk: list):
+        self.visualizer.push_live_samples(samples_chunk)
+
+    def _on_streaming_error(self, err_msg: str):
+        self._stop_playback()
+        QMessageBox.critical(self, "Error de Reproducción Continua", err_msg)
+
     def _run_bytebeat(self):
+        self._stop_playback()
+
         formula = self.txt_formula.toPlainText().strip()
         if not formula:
             return
 
-        rate_map = {0: 8000, 1: 11025, 2: 16000, 3: 22050, 4: 44100}
-        rate = rate_map.get(self.combo_rate.currentIndex(), 8000)
+        rate = self._get_selected_rate()
         dur = float(self.spin_duration.value())
 
         try:
             samples = SynthEngine.evaluate_bytebeat(formula, duration_sec=dur, sample_rate=rate)
             self.current_samples = samples
             self.current_sample_rate = rate
+            self.btn_export.setEnabled(True)
+            self.btn_export.setToolTip("Exportar pista completa a archivo .WAV")
+            self.visualizer.set_live_mode(False)
             self.visualizer.set_samples(samples)
             self._play_current_samples()
         except Exception as e:
             QMessageBox.critical(self, "Error de Síntesis", f"No se pudo evaluar la fórmula:\n{e}")
 
     def _trigger_sfx(self, preset: dict):
+        self._stop_playback()
+
         rate = 44100
         samples = SynthEngine.generate_sfx(
             sfx_type=preset["type"],
@@ -287,6 +397,9 @@ class AudioLabWindow(QMainWindow):
         )
         self.current_samples = samples
         self.current_sample_rate = rate
+        self.btn_export.setEnabled(True)
+        self.btn_export.setToolTip("Exportar efecto de sonido a archivo .WAV")
+        self.visualizer.set_live_mode(False)
         self.visualizer.set_samples(samples)
         self._play_current_samples()
 
@@ -305,7 +418,42 @@ class AudioLabWindow(QMainWindow):
 
         threading.Thread(target=_worker, daemon=True).start()
 
+    def _stop_playback(self):
+        # Detener streaming infinito si está activo
+        if self.stream_manager.is_running():
+            self.stream_manager.stop_stream()
+            self.btn_infinite.setText("♾️ Reproducir Sin Límite")
+            self.btn_infinite.setStyleSheet("""
+                QPushButton {
+                    background-color: #8B5CF6;
+                    color: #FFFFFF;
+                    font-weight: 700;
+                    font-size: 10pt;
+                    padding: 0 20px;
+                    border-radius: 8px;
+                    border: none;
+                }
+                QPushButton:hover { background-color: #7C3AED; }
+            """)
+            self.btn_export.setEnabled(True if self.current_samples else False)
+            self.visualizer.set_live_mode(False)
+
+        # Detener winsound
+        try:
+            import winsound
+            winsound.PlaySound(None, winsound.SND_PURGE)
+        except Exception:
+            pass
+
     def _export_wav(self):
+        if self.stream_manager.is_running():
+            QMessageBox.information(
+                self, "Exportación no disponible",
+                "El modo 'Sin Límite' reproduce un flujo infinito continuo y no tiene un tamaño o duración definidos para descargar.\n\n"
+                "Para exportar un archivo .WAV, usa el botón 'Sintetizar y Reproducir' con una duración definida."
+            )
+            return
+
         if not self.current_samples:
             QMessageBox.information(self, "AudioLab", "Primero sintetiza una fórmula o genera un efecto para exportar.")
             return
@@ -321,6 +469,10 @@ class AudioLabWindow(QMainWindow):
                 QMessageBox.information(self, "Exportación Exitosa", f"Archivo de audio guardado en:\n{out_path}")
             except Exception as e:
                 QMessageBox.critical(self, "Error al Exportar", f"No se pudo guardar el archivo:\n{e}")
+
+    def closeEvent(self, event):
+        self._stop_playback()
+        super().closeEvent(event)
 
     def _apply_dark_theme(self):
         self.setStyleSheet("""

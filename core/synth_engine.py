@@ -201,6 +201,22 @@ class ExprParser:
 
 class SynthEngine:
     @staticmethod
+    def compile_formula(formula_str: str):
+        """
+        Transpila y compila una fórmula matemática Bytebeat (C/JS/Python)
+        para ejecución ultra-rápida en eval().
+        """
+        clean_formula = formula_str.strip()
+        transpiled = clean_formula
+        try:
+            parser = ExprParser(clean_formula)
+            transpiled = parser.parse()
+        except Exception:
+            transpiled = clean_formula
+
+        return compile(transpiled, "<string>", "eval")
+
+    @staticmethod
     def evaluate_bytebeat(formula_str: str, duration_sec: float = 4.0, sample_rate: int = 8000) -> list[float]:
         """
         Evalúa de forma segura una expresión matemática Bytebeat sobre 't' (0..N).

@@ -2,81 +2,21 @@
 core/live_streamer.py
 ─────────────────────
 Generador y reproductor de audio continuo en tiempo real (modo sin límite de tiempo).
-Utiliza QAudioSink y QIODevice de QtMultimedia para emitir audio de manera ininterrumpida
-mientras evalúa la fórmula matemática (Bytebeat) en tiempo real y retroalimenta
-al visualizador espectral.
+Utiliza QAudioSink en modo Push (con QTimer de alta frecuencia) para alimentar
+el buffer del dispositivo de audio del sistema de manera ininterrumpida y sin cortes,
+mientras actualiza las muestras reactivas para los visualizadores espectrales.
 """
 
 import math
 import struct
-from PyQt6.QtCore import QIODevice, QByteArray, pyqtSignal, QObject
+from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 from PyQt6.QtMultimedia import QAudioSink, QAudioFormat, QMediaDevices
 from core.synth_engine import SynthEngine
 
 
-class BytebeatAudioDevice(QIODevice):
-    """
-    Dispositivo QIODevice que genera muestras PCM en tiempo real on-demand
-    para el QAudioSink.
-    """
-    def __init__(self, code_obj, sample_rate=8000, parent=None):
-        super().__init__(parent)
-        self.code_obj = code_obj
-        self.sample_rate = sample_rate
-        self.t = 0
-        self.chunk_size = 1024
-        self.on_samples_chunk = None  # Callback para visualizador
-
-    def isSequential(self):
-        return True
-
-    def readData(self, maxlen):
-        if maxlen <= 0 or not self.code_obj:
-            return b""
-
-        # 16-bit Mono PCM: 2 bytes por muestra
-        samples_to_generate = maxlen // 2
-        if samples_to_generate <= 0:
-            return b""
-
-        out_bytes = bytearray()
-        float_samples = []
-
-        code = self.code_obj
-        g_vars = {"sin": math.sin, "cos": math.cos, "tan": math.tan, "pi": math.pi, "random": math.sin}
-
-        t_curr = self.t
-        for _ in range(samples_to_generate):
-            try:
-                g_vars["t"] = t_curr
-                val = eval(code, g_vars)
-                byte_val = int(val) & 0xFF
-            except Exception:
-                byte_val = 128
-
-            # Convertir 0..255 bytebeat a 16-bit firmado
-            norm_val = ((byte_val - 128) / 128.0)
-            pcm_val = int(norm_val * 32767.0)
-            pcm_val = max(-32768, min(32767, pcm_val))
-            out_bytes.extend(struct.pack('<h', pcm_val))
-
-            float_samples.append(norm_val)
-            t_curr += 1
-
-        self.t = t_curr
-
-        if self.on_samples_chunk and float_samples:
-            self.on_samples_chunk(float_samples)
-
-        return bytes(out_bytes)
-
-    def writeData(self, data):
-        return 0
-
-
 class LiveStreamManager(QObject):
     """
-    Controlador de transmisión de audio infinita.
+    Controlador de streaming continuo en tiempo real para fórmulas Bytebeat.
     """
     samples_generated = pyqtSignal(list)
     streaming_error = pyqtSignal(str)
@@ -84,68 +24,154 @@ class LiveStreamManager(QObject):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.audio_sink = None
-        self.audio_device = None
+        self.io_device = None
         self._is_running = False
-        self.current_formula = ""
-        self.current_sample_rate = 8000
+
+        self.compiled_code = None
+        self.formula_sample_rate = 8000
+        self.device_sample_rate = 44100
+        self.t_fraction = 0.0
+        self.dt = 1.0
+
+        # Timer para alimentar el buffer de audio a intervalos regulares (~20ms)
+        self.push_timer = QTimer(self)
+        self.push_timer.setInterval(20)
+        self.push_timer.timeout.connect(self._push_audio_chunk)
+
+        # Variables disponibles para la fórmula
+        self.eval_globals = {
+            "sin": math.sin,
+            "cos": math.cos,
+            "tan": math.tan,
+            "sqrt": math.sqrt,
+            "pi": math.pi,
+            "floor": math.floor,
+            "ceil": math.ceil,
+            "abs": abs,
+            "min": min,
+            "max": max,
+            "int": int,
+            "t": 0,
+        }
 
     def is_running(self) -> bool:
         return self._is_running
 
-    def start_infinite_stream(self, formula: str, sample_rate: int = 8000):
+    def start_infinite_stream(self, formula: str, sample_rate: int = 8000) -> bool:
         self.stop_stream()
 
-        # Compilar fórmula matemática con SynthEngine
+        # Compilar la fórmula Bytebeat
         try:
-            compiled_code = SynthEngine.compile_formula(formula)
+            self.compiled_code = SynthEngine.compile_formula(formula)
         except Exception as e:
             self.streaming_error.emit(f"Error en la fórmula matemática:\n{e}")
             return False
 
-        self.current_formula = formula
-        self.current_sample_rate = sample_rate
-
-        # Configurar formato de audio QAudioFormat
-        format = QAudioFormat()
-        format.setSampleRate(sample_rate)
-        format.setChannelCount(1)
-        format.setSampleFormat(QAudioFormat.SampleFormat.Int16)
+        self.formula_sample_rate = sample_rate
 
         dev = QMediaDevices.defaultAudioOutput()
         if not dev or dev.isNull():
             self.streaming_error.emit("No se detectó ningún dispositivo de salida de audio en el sistema.")
             return False
 
-        if not dev.isFormatSupported(format):
-            format = dev.preferredFormat()
+        # Configurar formato PCM 16-bit Mono compatible
+        target_format = QAudioFormat()
+        target_format.setSampleRate(44100)
+        target_format.setChannelCount(1)
+        target_format.setSampleFormat(QAudioFormat.SampleFormat.Int16)
 
-        self.audio_sink = QAudioSink(dev, format, self)
-        self.audio_device = BytebeatAudioDevice(compiled_code, sample_rate=format.sampleRate(), parent=self)
-        self.audio_device.on_samples_chunk = self._handle_chunk_generated
+        if not dev.isFormatSupported(target_format):
+            # Usar formato preferido si 44100 Hz mono no estuviese soportado directamente
+            pref = dev.preferredFormat()
+            target_format.setSampleRate(pref.sampleRate())
+            target_format.setChannelCount(1)
+            target_format.setSampleFormat(QAudioFormat.SampleFormat.Int16)
 
-        if not self.audio_device.open(QIODevice.OpenModeFlag.ReadOnly):
-            self.streaming_error.emit("No se pudo iniciar el buffer continuo de audio.")
+        self.device_sample_rate = target_format.sampleRate()
+        self.dt = float(self.formula_sample_rate) / float(self.device_sample_rate)
+        self.t_fraction = 0.0
+
+        try:
+            self.audio_sink = QAudioSink(dev, target_format, self)
+            self.audio_sink.setBufferSize(target_format.bytesForDuration(150000))  # 150ms buffer
+            self.io_device = self.audio_sink.start()
+        except Exception as e:
+            self.streaming_error.emit(f"No se pudo inicializar la salida de audio:\n{e}")
             return False
 
-        self.audio_sink.start(self.audio_device)
+        if not self.io_device:
+            self.streaming_error.emit("El dispositivo de audio no admitió el flujo continuo.")
+            return False
+
         self._is_running = True
+        self.push_timer.start()
+
+        # Forzar un primer push inmediato para llenar el buffer
+        self._push_audio_chunk()
         return True
 
-    def _handle_chunk_generated(self, float_samples: list):
-        self.samples_generated.emit(float_samples)
+    def _push_audio_chunk(self):
+        if not self._is_running or not self.audio_sink or not self.io_device:
+            return
+
+        free_bytes = self.audio_sink.bytesFree()
+        if free_bytes < 512:
+            return
+
+        # Limitar el chunk máximo por tick para no sobrecargar el hilo UI (~40ms de audio)
+        max_bytes = min(free_bytes, int(self.device_sample_rate * 0.05 * 2))
+        samples_to_generate = max_bytes // 2
+        if samples_to_generate <= 0:
+            return
+
+        out_raw = bytearray()
+        float_samples = []
+
+        code = self.compiled_code
+        g = self.eval_globals
+        t_f = self.t_fraction
+        dt = self.dt
+
+        # Paso de submuestreo para el visualizador (enviar ~128 puntos por chunk para fluidez)
+        vis_step = max(1, samples_to_generate // 128)
+
+        for i in range(samples_to_generate):
+            t_int = int(t_f)
+            g["t"] = t_int
+            try:
+                val = eval(code, {"__builtins__": {}}, g)
+                byte_val = int(val) & 0xFF
+            except Exception:
+                byte_val = 128
+
+            norm = (byte_val - 128) / 128.0
+            pcm = max(-32768, min(32767, int(norm * 32767)))
+            out_raw.extend(struct.pack("<h", pcm))
+
+            if i % vis_step == 0:
+                float_samples.append(norm)
+
+            t_f += dt
+
+        self.t_fraction = t_f
+
+        try:
+            self.io_device.write(bytes(out_raw))
+        except Exception:
+            pass
+
+        if float_samples:
+            self.samples_generated.emit(float_samples)
 
     def stop_stream(self):
         self._is_running = False
+        if self.push_timer.isActive():
+            self.push_timer.stop()
+
         if self.audio_sink:
             try:
                 self.audio_sink.stop()
             except Exception:
                 pass
             self.audio_sink = None
-
-        if self.audio_device:
-            try:
-                self.audio_device.close()
-            except Exception:
-                pass
-            self.audio_device = None
+            self.io_device = None

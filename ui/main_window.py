@@ -78,24 +78,50 @@ class AudioLabWindow(QMainWindow):
         header_layout.addLayout(title_box)
         header_layout.addStretch()
 
-        # Botón Detener Todo
-        self.btn_stop = QPushButton("Detener")
-        self.btn_stop.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_stop.setFixedHeight(38)
-        self.btn_stop.setStyleSheet("""
-            QPushButton {
-                background-color: #334155;
-                color: #F8FAFC;
-                font-weight: 700;
-                font-size: 9.5pt;
-                padding: 0 18px;
-                border-radius: 8px;
-                border: 1px solid #475569;
+        # Control de Volumen en Tiempo Real
+        vol_box = QHBoxLayout()
+        vol_box.setSpacing(8)
+
+        lbl_vol_title = QLabel("Volumen:")
+        lbl_vol_title.setStyleSheet("color: #94A3B8; font-size: 9.5pt; font-weight: 600;")
+
+        self.slider_volume = QSlider(Qt.Orientation.Horizontal)
+        self.slider_volume.setRange(0, 100)
+        self.slider_volume.setValue(70)
+        self.slider_volume.setFixedWidth(110)
+        self.slider_volume.setStyleSheet("""
+            QSlider::groove:horizontal {
+                height: 6px;
+                background: #1E293B;
+                border-radius: 3px;
             }
-            QPushButton:hover { background-color: #475569; }
+            QSlider::sub-page:horizontal {
+                background: #38BDF8;
+                border-radius: 3px;
+            }
+            QSlider::handle:horizontal {
+                background: #FFFFFF;
+                width: 14px;
+                margin-top: -4px;
+                margin-bottom: -4px;
+                border-radius: 7px;
+            }
+            QSlider::handle:horizontal:hover {
+                background: #BAE6FD;
+            }
         """)
-        self.btn_stop.clicked.connect(self._stop_playback)
-        header_layout.addWidget(self.btn_stop)
+        self.slider_volume.valueChanged.connect(self._on_volume_changed)
+
+        self.lbl_vol_val = QLabel("70%")
+        self.lbl_vol_val.setFixedWidth(38)
+        self.lbl_vol_val.setStyleSheet("color: #F8FAFC; font-weight: 700; font-size: 9pt;")
+
+        vol_box.addWidget(lbl_vol_title)
+        vol_box.addWidget(self.slider_volume)
+        vol_box.addWidget(self.lbl_vol_val)
+        header_layout.addLayout(vol_box)
+
+        header_layout.addSpacing(14)
 
         # Botón Exportar WAV (Siempre disponible en tiempo real)
         self.btn_export = QPushButton("Exportar .WAV")
@@ -346,6 +372,11 @@ class AudioLabWindow(QMainWindow):
     def _on_streaming_error(self, err_msg: str):
         self._stop_playback()
         QMessageBox.critical(self, "Error de Reproducción", err_msg)
+
+    def _on_volume_changed(self, val: int):
+        vol_float = val / 100.0
+        self.lbl_vol_val.setText(f"{val}%")
+        self.stream_manager.set_volume(vol_float)
 
     def _trigger_sfx(self, preset: dict):
         self._stop_playback()

@@ -551,6 +551,8 @@ class WaveVisualizer(QWidget):
             is_active = (btn.property("mode_id") == selected_mode)
             self._style_mode_btn(btn, is_active)
         self.canvas.set_mode(selected_mode)
+        # Mostrar controles de Zoom únicamente cuando el modo Barrido esté activo
+        self.zoom_box.setVisible(selected_mode == "sweep")
 
     def _on_zoom_in(self):
         new_label = self.canvas.zoom_in()

@@ -33,6 +33,8 @@ class LiveStreamManager(QObject):
         self.t_fraction = 0.0
         self.dt = 1.0
 
+        self.current_volume = 0.7  # Volumen por defecto (70%)
+
         # Timer para alimentar el buffer de audio a intervalos regulares (~20ms)
         self.push_timer = QTimer(self)
         self.push_timer.setInterval(20)
@@ -94,6 +96,7 @@ class LiveStreamManager(QObject):
         try:
             self.audio_sink = QAudioSink(dev, target_format, self)
             self.audio_sink.setBufferSize(target_format.bytesForDuration(150000))  # 150ms buffer
+            self.audio_sink.setVolume(self.current_volume)
             self.io_device = self.audio_sink.start()
         except Exception as e:
             self.streaming_error.emit(f"No se pudo inicializar la salida de audio:\n{e}")
@@ -162,6 +165,15 @@ class LiveStreamManager(QObject):
 
         if float_samples:
             self.samples_generated.emit(float_samples)
+
+    def set_volume(self, volume: float):
+        """Ajusta el volumen en tiempo real (0.0 a 1.0)."""
+        self.current_volume = max(0.0, min(1.0, volume))
+        if self.audio_sink:
+            try:
+                self.audio_sink.setVolume(self.current_volume)
+            except Exception:
+                pass
 
     def stop_stream(self):
         self._is_running = False

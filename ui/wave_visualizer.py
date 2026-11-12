@@ -2,10 +2,10 @@
 ui/wave_visualizer.py
 ─────────────────────
 Componente interactivo en PyQt6 para visualizar audio en tiempo real con 4 modos:
-1. Osciloscopio Neón (Forma de onda clásica con gradiente neón)
-2. Espectro de Barras FFT (Frecuencias en tiempo real con bandas estilo ecualizador)
-3. Circular / Radar Cósmico (Reactivo radial de 360 grados)
-4. Cinta Continua / Waterfall (Tira de onda que avanza horizontalmente en bucle infinito)
+1. Onda Clásica (Forma de onda con gradiente neón)
+2. Espectro Barras (Frecuencias en tiempo real con bandas estilo ecualizador)
+3. Radar Cósmico (Reactivo radial de 360 grados)
+4. Flujo Continuo (Tira de onda que avanza horizontalmente en tiempo real)
 """
 
 import math
@@ -26,7 +26,7 @@ class VisualizerCanvas(QWidget):
         self.playhead_progress = 0.0
         self.is_live = False
         self.live_buffer = []  # Muestras recientes para tiempo real
-        self.max_live_samples = 1024
+        self.max_live_samples = 2048
         self.scroll_offset = 0
 
         # Animación continua (60 FPS para tiempo real)
@@ -72,7 +72,7 @@ class VisualizerCanvas(QWidget):
 
     def _on_anim_tick(self):
         if self.is_live or self.playhead_progress > 0.0:
-            self.scroll_offset = (self.scroll_offset + 3) % 100000
+            self.scroll_offset = (self.scroll_offset + 4) % 100000
             self.update()
 
     def paintEvent(self, event):
@@ -125,7 +125,7 @@ class VisualizerCanvas(QWidget):
         for x in range(0, w, 40):
             painter.drawLine(x, 0, x, h)
 
-    # 1. Modo Forma de Onda Neón Clásica
+    # 1. Modo Forma de Onda Clásica
     def _draw_wave(self, painter: QPainter, w: int, h: int, samples: list):
         mid_y = h / 2.0
         step = max(1, len(samples) // w)
@@ -159,20 +159,17 @@ class VisualizerCanvas(QWidget):
             chunk = samples[i * chunk_size:(i + 1) * chunk_size]
             if not chunk:
                 continue
-            # RMS / Amplitud promedio
             rms = math.sqrt(sum(s * s for s in chunk) / len(chunk))
             intensity = min(1.0, rms * 2.2)
 
-            # Efecto reactivo con animación
             bar_h = max(6.0, intensity * (h * 0.85))
             x = i * (bar_w + 4) + 2
             y = h - bar_h - 10
 
-            # Gradiente vertical de verde a cian/magenta
             grad = QLinearGradient(x, h, x, y)
             grad.setColorAt(0.0, QColor("#06B6D4"))  # Cian base
             grad.setColorAt(0.6, QColor("#3B82F6"))  # Azul
-            grad.setColorAt(1.0, QColor("#EC4899"))  # Neón rosa pico
+            grad.setColorAt(1.0, QColor("#EC4899"))  # Rosa pico
 
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(QBrush(grad))
@@ -189,7 +186,6 @@ class VisualizerCanvas(QWidget):
         base_radius = min(cx, cy) * 0.42
         max_expand = min(cx, cy) * 0.45
 
-        # Círculo base brillante
         rad_grad = QRadialGradient(cx, cy, base_radius * 1.5)
         rad_grad.setColorAt(0.0, QColor(30, 41, 59, 80))
         rad_grad.setColorAt(0.7, QColor(56, 189, 248, 40))
@@ -219,7 +215,6 @@ class VisualizerCanvas(QWidget):
                 next_p = points[(i + 1) % len(points)]
                 painter.drawLine(points[i], next_p)
 
-                # Líneas de rayo hacia el centro
                 if i % 3 == 0:
                     in_x = cx + base_radius * 0.85 * math.cos((2.0 * math.pi * i) / num_spokes)
                     in_y = cy + base_radius * 0.85 * math.sin((2.0 * math.pi * i) / num_spokes)
@@ -228,16 +223,15 @@ class VisualizerCanvas(QWidget):
                     painter.drawLine(QPointF(in_x, in_y), points[i])
                     painter.setPen(pen_rad)
 
-    # 4. Modo Cinta Waterfall / Flujo Continuo Horizontal
+    # 4. Modo Flujo Continuo Horizontal
     def _draw_waterfall(self, painter: QPainter, w: int, h: int, samples: list):
         mid_y = h / 2.0
         step = max(1, len(samples) // w)
 
-        # Gradiente fluido horizontal
         grad = QLinearGradient(0, 0, w, 0)
-        grad.setColorAt(0.0, QColor("#10B981"))  # Verde esmeralda
+        grad.setColorAt(0.0, QColor("#10B981"))  # Verde
         grad.setColorAt(0.5, QColor("#38BDF8"))  # Cian
-        grad.setColorAt(1.0, QColor("#F59E0B"))  # Ámbar dorado
+        grad.setColorAt(1.0, QColor("#F59E0B"))  # Ámbar
 
         pen_flow = QPen(QBrush(grad), 2.2)
         painter.setPen(pen_flow)
@@ -253,7 +247,6 @@ class VisualizerCanvas(QWidget):
         for i in range(len(points) - 1):
             painter.drawLine(points[i], points[i + 1])
 
-        # Rastro sombreado abajo para efecto cascada/waterfall
         poly = [QPointF(0, h)] + points + [QPointF(w, h)]
         fill_grad = QLinearGradient(0, mid_y, 0, h)
         fill_grad.setColorAt(0.0, QColor(56, 189, 248, 55))
@@ -265,11 +258,11 @@ class VisualizerCanvas(QWidget):
 
 class WaveVisualizer(QWidget):
     """
-    Contenedor principal del visualizador que incluye la botonera de modos:
-    - 🌊 Onda Clásica
-    - 📊 Espectro FFT (Barras)
-    - 🌀 Radar Cósmico
-    - 🚀 Cinta Continua (Live Flow)
+    Contenedor principal del visualizador que incluye la botonera de modos limpios:
+    - Onda
+    - Espectro Barras
+    - Radar Cósmico
+    - Flujo Continuo
     """
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -285,10 +278,10 @@ class WaveVisualizer(QWidget):
         lbl_mode.setStyleSheet("color: #94A3B8; font-size: 9pt; font-weight: 600;")
         top_bar.addWidget(lbl_mode)
 
-        self.btn_wave = self._create_mode_btn("🌊 Onda", "wave", active=True)
-        self.btn_bars = self._create_mode_btn("📊 Espectro Barras", "bars")
-        self.btn_radial = self._create_mode_btn("🌀 Radar Cósmico", "radial")
-        self.btn_flow = self._create_mode_btn("🚀 Flujo Continuo", "waterfall")
+        self.btn_wave = self._create_mode_btn("Onda", "wave", active=True)
+        self.btn_bars = self._create_mode_btn("Espectro Barras", "bars")
+        self.btn_radial = self._create_mode_btn("Radar Cósmico", "radial")
+        self.btn_flow = self._create_mode_btn("Flujo Continuo", "waterfall")
 
         self.mode_buttons = [self.btn_wave, self.btn_bars, self.btn_radial, self.btn_flow]
 
@@ -298,7 +291,7 @@ class WaveVisualizer(QWidget):
         top_bar.addWidget(self.btn_flow)
         top_bar.addStretch()
 
-        self.lbl_live_badge = QLabel("• TIEMPO REAL")
+        self.lbl_live_badge = QLabel("TIEMPO REAL")
         self.lbl_live_badge.setStyleSheet("""
             color: #10B981;
             font-size: 8.5pt;

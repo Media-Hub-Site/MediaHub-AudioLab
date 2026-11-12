@@ -3,11 +3,7 @@ ui/main_window.py
 ─────────────────
 Ventana Principal de AudioLab — Estudio de Síntesis Matemática y Efectos Procedurales.
 Diseño moderno Bento Grid / Media Hub Theme.
-Incluye:
-- Visualizador multi-espectro (Onda, Barras FFT, Radar Cósmico, Cinta Waterfall continua).
-- Modo de reproducción infinita sin límite de tiempo (Live Stream continuo).
-- Bloqueo visual e informativo para no exportar audio ilimitado.
-- Presets de Bytebeat y efectos procedurales SFX.
+Botones con tipografía e interfaz limpia y profesional sin emojis en etiquetas.
 """
 
 import os
@@ -17,7 +13,7 @@ import threading
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QPlainTextEdit, QComboBox, QSlider, QSpinBox, QFileDialog, QMessageBox,
-    QTabWidget, QFrame, QGridLayout, QScrollArea, QCheckBox
+    QTabWidget, QFrame, QGridLayout, QScrollArea
 )
 from PyQt6.QtGui import QIcon, QFont
 from PyQt6.QtCore import Qt, QTimer
@@ -81,7 +77,7 @@ class AudioLabWindow(QMainWindow):
         header_layout.addStretch()
 
         # Botón Detener Todo
-        self.btn_stop = QPushButton("⏹ Detener")
+        self.btn_stop = QPushButton("Detener")
         self.btn_stop.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_stop.setFixedHeight(38)
         self.btn_stop.setStyleSheet("""
@@ -225,7 +221,7 @@ class AudioLabWindow(QMainWindow):
         controls_row.addStretch()
 
         # Botón 1: Sintetizar y Reproducir Finito
-        self.btn_play_bytebeat = QPushButton("▶ Sintetizar y Reproducir")
+        self.btn_play_bytebeat = QPushButton("Sintetizar y Reproducir")
         self.btn_play_bytebeat.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_play_bytebeat.setFixedHeight(40)
         self.btn_play_bytebeat.setStyleSheet("""
@@ -244,7 +240,7 @@ class AudioLabWindow(QMainWindow):
         controls_row.addWidget(self.btn_play_bytebeat)
 
         # Botón 2: Reproducción Continua Sin Límite
-        self.btn_infinite = QPushButton("♾️ Reproducir Sin Límite")
+        self.btn_infinite = QPushButton("Reproducir Sin Límite")
         self.btn_infinite.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_infinite.setFixedHeight(40)
         self.btn_infinite.setStyleSheet("""
@@ -265,7 +261,7 @@ class AudioLabWindow(QMainWindow):
         layout.addLayout(controls_row)
 
         # Barra informativa sobre el modo sin límite
-        self.lbl_infinite_notice = QLabel("💡 Modo 'Sin Límite': reproduce continuamente en tiempo real. En este modo no se descarga el archivo ya que no tiene duración fija.")
+        self.lbl_infinite_notice = QLabel("Modo Sin Límite: reproduce continuamente en tiempo real. En este modo no se descarga el archivo ya que no tiene duración fija.")
         self.lbl_infinite_notice.setStyleSheet("color: #A78BFA; font-size: 8.5pt; font-style: italic;")
         layout.addWidget(self.lbl_infinite_notice)
 
@@ -281,7 +277,7 @@ class AudioLabWindow(QMainWindow):
         grid.setSpacing(10)
 
         for i, p in enumerate(SFX_PRESETS):
-            btn = QPushButton(f"🔊  {p['name']}")
+            btn = QPushButton(p["name"])
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.setFixedHeight(44)
             btn.setStyleSheet("""
@@ -338,7 +334,7 @@ class AudioLabWindow(QMainWindow):
         rate = self._get_selected_rate()
         started = self.stream_manager.start_infinite_stream(formula, sample_rate=rate)
         if started:
-            self.btn_infinite.setText("⏹ Detener Sin Límite")
+            self.btn_infinite.setText("Detener Sin Límite")
             self.btn_infinite.setStyleSheet("""
                 QPushButton {
                     background-color: #DC2626;
@@ -422,7 +418,7 @@ class AudioLabWindow(QMainWindow):
         # Detener streaming infinito si está activo
         if self.stream_manager.is_running():
             self.stream_manager.stop_stream()
-            self.btn_infinite.setText("♾️ Reproducir Sin Límite")
+            self.btn_infinite.setText("Reproducir Sin Límite")
             self.btn_infinite.setStyleSheet("""
                 QPushButton {
                     background-color: #8B5CF6;
@@ -449,7 +445,7 @@ class AudioLabWindow(QMainWindow):
         if self.stream_manager.is_running():
             QMessageBox.information(
                 self, "Exportación no disponible",
-                "El modo 'Sin Límite' reproduce un flujo infinito continuo y no tiene un tamaño o duración definidos para descargar.\n\n"
+                "El modo Sin Límite reproduce un flujo infinito continuo y no tiene un tamaño o duración definidos para descargar.\n\n"
                 "Para exportar un archivo .WAV, usa el botón 'Sintetizar y Reproducir' con una duración definida."
             )
             return
